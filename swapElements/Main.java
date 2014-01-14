@@ -1,0 +1,67 @@
+/*
+ * You are given a list of numbers which is supplemented with positions that have to be swapped.
+ */
+
+package codeval.swapElements;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+/**
+ *
+ * @author cpvalcourt
+ */
+public class Main {
+
+    public static void main(String[] args) {
+        try {
+            String line;
+            List<String> values;
+            String[] swapIndexes;
+
+            // Get File
+            File file = new File(args[0]);
+            BufferedReader in = new BufferedReader(new FileReader(file));
+
+            // Read each line into ArrayList
+            while ((line = in.readLine()) != null) {
+                line.trim();
+                if (line.length() > 0) {
+                    String[] lineArray = line.split(":");
+                    // First part is input array
+                    String[] inputs = lineArray[0].trim().split(" ");
+                    // Init values
+                    values = new ArrayList<String>(Arrays.asList(inputs));
+ 
+                    // second part if the indexes to swap
+                    if (lineArray[1].contains(",")) {
+                        swapIndexes = lineArray[1].split(",");
+                    } else {
+                        swapIndexes = new String[]{lineArray[1]};
+                    }
+
+                    for (String indexes : swapIndexes) {
+                        String[] range = indexes.split("-");
+                        int from = Integer.parseInt(range[0].trim());
+                        int to = Integer.parseInt(range[1].trim());
+                        // Swap 'em here
+                        String temp = values.get(from);
+                        values.set(from, values.get(to));
+                        values.set(to, temp);
+                    }
+                    for (String value : values) {
+                        System.out.print(value + " ");
+                    }
+                    System.out.println();
+                }
+            }
+        } catch (IOException | NumberFormatException e) {
+            System.out.println("File Read Error: " + e.getMessage());
+        }
+    }
+}
