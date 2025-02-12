@@ -1,9 +1,6 @@
 /*
  * Codeeval challenge: program to read a multiple line text file and write the 'N' longest lines to stdout
  */
-
-package codeval.longestLines;
-
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
