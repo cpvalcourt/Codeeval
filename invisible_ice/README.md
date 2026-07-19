@@ -115,9 +115,38 @@ full pipeline end-to-end on a 10-game synthetic corpus (bounded EPV,
 probability conservation, attribution conservation, and a sanity check
 that EPV is higher near the net than in the neutral zone).
 
-## Phase 4 (not in this package)
+## Phase 4 — interactive frontend
 
-The React / Canvas / D3 frontend and edge deployment consume
-`PossessionAnalysis` outputs (features + EPV curve + attribution per
-possession); serialization for the browser is deliberately deferred so
-the engine stays UI-agnostic.
+`src/invisible_ice/export.py` serializes `PossessionAnalysis` results
+into a compact, versioned JSON payload (structure-of-arrays layout,
+coordinates quantized to 0.1 ft, probabilities to 4 decimals), and
+`frontend/` is a Vite + React + TypeScript viewer for it:
+
+- **Rink player** — HTML5 Canvas renderer (devicePixelRatio-aware) with
+  full rink markings, the Royal Road, color-coded team dots with jersey
+  numbers, goalie squares, and fading velocity trails, interpolated to
+  the display refresh rate from 30 fps tracking.
+- **EPV timeline** — d3-scale/d3-shape line + area chart with a
+  synchronized playhead, crosshair + tooltip on hover (EPV, xG,
+  P(shoot)), and click-to-seek into the replay.
+- **Controls & context** — play/pause/scrub/speed, per-possession
+  picker chips, live EPV readout, and the per-player on-/off-puck
+  attribution table.
+- **Theming** — light and dark from a validated palette (the categorical
+  team colors pass CVD-separation and contrast checks in both modes);
+  identity is never color-alone (shapes for goalies/puck, numbered
+  skaters, legend).
+
+```bash
+cd frontend
+npm install
+npm test                # 40 vitest unit tests (pure logic + stub-canvas draws)
+npm run dev             # dev server against public/data/demo.json
+npm run build           # type-check + production bundle (relative base,
+                        # deployable to any static host / edge CDN)
+python3 ../scripts/make_demo_data.py   # regenerate the demo payload
+```
+
+The playback engine, interpolation, payload validation, world→canvas
+transform, and both canvas draw layers are unit-tested; rendering was
+also verified by screenshotting the built app in both color schemes.

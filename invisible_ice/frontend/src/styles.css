@@ -1,0 +1,355 @@
+/* Design tokens: reference palette, light + dark (see src/lib/theme.ts —
+   canvas draw code mirrors these values). */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink-primary: #0b0b0b;
+  --ink-secondary: #52514e;
+  --ink-muted: #898781;
+  --gridline: #e1e0d9;
+  --baseline: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.1);
+  --home: #2a78d6;
+  --home-soft: rgba(42, 120, 214, 0.14);
+  --away: #008300;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink-primary: #ffffff;
+    --ink-secondary: #c3c2b7;
+    --ink-muted: #898781;
+    --gridline: #2c2c2a;
+    --baseline: #383835;
+    --border: rgba(255, 255, 255, 0.1);
+    --home: #3987e5;
+    --home-soft: rgba(57, 135, 229, 0.18);
+    --away: #008300;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink-primary);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.app {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.masthead h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin: 2px 0 0;
+  color: var(--ink-secondary);
+  font-size: 0.9rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.card h2 {
+  margin: 0 0 4px;
+  font-size: 1.02rem;
+}
+
+.hint {
+  margin: 0 0 10px;
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+}
+
+.error {
+  color: #d03b3b;
+}
+
+/* Possession picker */
+.possession-picker {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.picker-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink-secondary);
+  cursor: pointer;
+  font: inherit;
+}
+
+.picker-chip.active {
+  border-color: var(--home);
+  background: var(--home-soft);
+  color: var(--ink-primary);
+}
+
+.chip-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.chip-meta {
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Rink */
+.rink-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: var(--ink-secondary);
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.swatch.home {
+  background: var(--home);
+}
+
+.swatch.away {
+  background: var(--away);
+}
+
+.swatch.goalie {
+  background: var(--away);
+  border-radius: 2px;
+}
+
+.swatch.puck {
+  background: var(--ink-primary);
+  width: 7px;
+  height: 7px;
+}
+
+.live-epv {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.live-epv-label {
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.live-epv-value {
+  font-size: 1.4rem;
+  font-weight: 650;
+  color: var(--home);
+}
+
+.rink-canvas {
+  width: 100%;
+  display: block;
+}
+
+/* Controls */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.play-button {
+  width: 38px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--home);
+  color: #fff;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.scrubber {
+  flex: 1;
+  accent-color: var(--home);
+}
+
+.clock {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+  color: var(--ink-secondary);
+  white-space: nowrap;
+}
+
+.speed {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink-primary);
+}
+
+/* EPV chart */
+.epv-chart-wrap {
+  position: relative;
+}
+
+.epv-chart {
+  width: 100%;
+  display: block;
+  cursor: crosshair;
+}
+
+.grid-line {
+  stroke: var(--gridline);
+  stroke-width: 1;
+}
+
+.axis-line {
+  stroke: var(--baseline);
+  stroke-width: 1;
+}
+
+.tick-label {
+  fill: var(--ink-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.epv-line {
+  fill: none;
+  stroke: var(--home);
+  stroke-width: 2;
+}
+
+.epv-area {
+  fill: var(--home-soft);
+}
+
+.playhead {
+  stroke: var(--ink-secondary);
+  stroke-width: 1.5;
+}
+
+.crosshair {
+  stroke: var(--ink-muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.hover-dot {
+  fill: var(--home);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+
+.chart-tooltip {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  display: flex;
+  gap: 12px;
+  padding: 6px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: var(--ink-secondary);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.tooltip-time {
+  color: var(--ink-primary);
+  font-weight: 600;
+}
+
+/* Attribution table */
+.attribution-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.attribution-table th {
+  text-align: left;
+  color: var(--ink-muted);
+  font-weight: 500;
+  font-size: 0.75rem;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--gridline);
+}
+
+.attribution-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--gridline);
+}
+
+.attribution-table td .swatch {
+  margin-right: 8px;
+}
+
+.attribution-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-secondary);
+}
+
+.attribution-table .num.total {
+  color: var(--ink-primary);
+  font-weight: 600;
+}
+
+.empty-note {
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+}
