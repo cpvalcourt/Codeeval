@@ -156,7 +156,12 @@ def analyze_tracking(paths: list[Path]) -> None:
             print(f"   contiguous: {bool(len(gaps) and (gaps == 1).all())}")
             span = values[-1] - values[0] + 1
             if span > len(values):
-                print(f"   !! {span - len(values):,.0f} frame numbers absent inside the range")
+                big = gaps[gaps > 1]
+                print(f"   !! {span - len(values):,.0f} frame numbers absent inside the range, "
+                      f"in {len(big):,} gap(s) (largest {big.max():,.0f})")
+                print("      Ids run on broadcast time; tracking rows exist only during live")
+                print("      play, so these gaps are STOPPAGES. Split the game into contiguous")
+                print("      segments at them and process each separately (guide Step 4.1).")
 
         if clock_col:
             clock = pd.to_numeric(df[clock_col], errors="coerce")
@@ -170,9 +175,19 @@ def analyze_tracking(paths: list[Path]) -> None:
                 span_frames = paired["f"].max() - paired["f"].min()
                 span_seconds = abs(paired["c"].max() - paired["c"].min())
                 if span_seconds > 0:
+                    n_frames = len(values)
                     print("\n-- frame rate --")
-                    print(f"   ~{span_frames / span_seconds:.2f} frames/second "
-                          f"({span_frames:,.0f} frames over {span_seconds:,.0f}s)")
+                    print(f"   captured: ~{n_frames / span_seconds:.2f} fps "
+                          f"({n_frames:,} distinct frames over {span_seconds:,.0f}s of clock)")
+                    print(f"   id counter: ~{span_frames / span_seconds:.2f} ids/s "
+                          f"(spans {span_frames:,.0f} ids)")
+                    print("   The CAPTURED rate is the real one; if the id rate is higher,")
+                    print("   the counter keeps running through stoppages (see gaps above).")
+                clock_step = pd.Series(np.sort(paired["c"].unique())).diff().dropna()
+                if len(clock_step) and clock_step.mode()[0] >= 1.0:
+                    print(f"   !! clock resolution is {clock_step.mode()[0]:.0f}s — one clock value")
+                    print("      covers ~30 frames, so events cannot be aligned to a frame by")
+                    print("      clock alone; disambiguate with the event's X/Y (guide Step 6).")
                 counts_down = paired.sort_values("f")["c"].diff().mean() < 0
                 print(f"   clock counts {'DOWN' if counts_down else 'UP'}"
                       " (derive timestamps from the frame index, not the clock)")
@@ -198,31 +213,49 @@ def analyze_tracking(paths: list[Path]) -> None:
             if pct < 100:
                 print("   !! puck gaps present -> interpolation needed (guide Step 4.2)")
 
+    # Which column actually identifies a *player*? A feed may carry a
+    # per-detection track id (high cardinality) alongside a real identity
+    # like the jersey number (low cardinality). Picking wrong makes every
+    # entity_id unstable across frames.
+    jersey_col = pick(df, r"jersey")
+    identity_col = player_col
     if player_col:
-        print("\n-- player ids --")
-        ids = df[player_col].dropna().unique()
-        print(f"   {len(ids):,} distinct; sample {list(map(str, ids[:8]))}")
+        print("\n-- identity columns --")
+        n_player = int(df[player_col].nunique())
+        print(f"   {player_col!r}: {n_player:,} distinct")
+        if jersey_col:
+            n_jersey = int(df[jersey_col].nunique())
+            print(f"   {jersey_col!r}: {n_jersey:,} distinct")
+            if n_player > 3 * max(n_jersey, 1):
+                identity_col = jersey_col
+                print(f"   !! {player_col!r} looks like a per-detection TRACK id, not a player.")
+                print(f"      Build entity_id from team + {jersey_col!r} instead, and expect")
+                print("      the same skater to change track id mid-game.")
         if team_col:
-            by_team = df.groupby(team_col)[player_col].nunique()
-            print(f"   distinct players per team: {by_team.to_dict()}")
+            print(f"   distinct {identity_col!r} per team: "
+                  f"{df.groupby(team_col)[identity_col].nunique().to_dict()}")
+        unnamed = int(df[identity_col].isna().sum() - df[df[kind_col].astype(str)
+                      .str.contains('puck', case=False, na=False)].shape[0]) if kind_col else 0
+        if unnamed > 0:
+            print(f"   !! ~{unnamed:,} player rows have no {identity_col!r} — unidentified")
+            print("      detections; drop them (they cannot be given a stable entity_id).")
 
     # Goalies are rarely flagged in the feed; infer them from where they live.
-    if player_col and x_col and team_col:
+    if identity_col and x_col and team_col:
         print("\n-- likely goalies (mean |x| nearest the goal line) --")
-        players = df[df[player_col].notna()]
-        stats = players.groupby([team_col, player_col]).agg(
-            mean_x=(x_col, "mean"), frames=(x_col, "size")
+        players = df[df[identity_col].notna() & df[x_col].notna()]
+        stats = players.groupby([team_col, identity_col]).agg(
+            mean_x=(x_col, "mean"), rows=(x_col, "size")
         )
-        stats = stats[stats["frames"] > 0.05 * len(players)]
+        stats = stats[stats["rows"] >= 200]  # ignore cameo detections
         for team, group in stats.groupby(level=0):
             ranked = group.reindex(group["mean_x"].abs().sort_values(ascending=False).index)
-            top = ranked.head(2)
             print(f"   {team}:")
-            for (_, pid), row in top.iterrows():
-                print(f"      player {pid:>8} mean x {row['mean_x']:+7.1f} "
-                      f"({row['frames']:,} rows)")
-        print("   The extreme-|x| player per team is almost certainly the goalie;")
-        print("   confirm against the Shifts file, then set position='goalie'.")
+            for (_, pid), row in ranked.head(3).iterrows():
+                print(f"      {str(pid):>8}  mean x {row['mean_x']:+7.1f}  ({row['rows']:,} rows)")
+        print("   A goalie sits near ±89 while skaters average near 0; the gap between")
+        print("   the 1st and 2nd row per team should be obvious. Confirm via Shifts,")
+        print("   then set position='goalie' for those ids.")
 
 
 def analyze_events(paths: list[Path]) -> None:
