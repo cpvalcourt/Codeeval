@@ -41,16 +41,27 @@ do, see Step 5).
 
 ## Step 2 — Explore and pin down the conventions
 
-Never trust a schema description, including this one. In a notebook or
-REPL, confirm each item and write your findings down — they become
-constants in your adapter:
+Never trust a schema description, including this one. **Run the
+reconnaissance script** — it answers the whole checklist below
+automatically and is read-only:
 
-```python
-import pandas as pd
-t = pd.read_csv("rawdata/<game> Tracking_P1.csv")
-e = pd.read_csv("rawdata/<game> Events.csv")
-t.columns.tolist(); t.head(20); t.describe()
+```bash
+python3 scripts/inspect_raw_data.py /path/to/rawdata
+python3 scripts/inspect_raw_data.py /path/to/rawdata --game 2026-01-17
 ```
+
+It reports the file inventory, every column with dtype/range/values,
+the inferred column roles, the coordinate extents (and which
+normalization path they imply), frame contiguity, the measured frame
+rate, clock direction, puck-row coverage with a warning if there are
+gaps, entities-per-frame stability, roster ids per team, and the event
+vocabulary. Save its output:
+
+```bash
+python3 scripts/inspect_raw_data.py /path/to/rawdata > docs/raw_data_findings.txt
+```
+
+Spot-check anything surprising by hand in pandas before trusting it.
 
 Checklist to resolve:
 
