@@ -303,9 +303,77 @@ you already configured redeploys automatically from `master`.
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | `SchemaError: frame X has skaters but no puck row` | puck occluded in broadcast | Step 4.2 interpolation |
+| all entity ids unstable frame to frame | using a track id as identity | Appendix: use team + jersey |
 | `ValueError: entity ... missing frames in possession` (export) | players leaving camera view | Step 4.3 reindex/interpolate policy |
 | EPV flat ~0 everywhere | no `shoot` labels reached the model | event→frame alignment; horizon in frames vs seconds |
 | Possessions absurdly short/long | control radius vs tracking noise | tune `PossessionConfig`; try radius 5–6, `loose_frames` ≈ 0.3 s of frames |
 | Team attacks the wrong way in P2 | period flip missed | `camera_orientations.csv` mapping in Step 5 |
 | Kinematics speeds are insane (>50 ft/s) | frame gaps treated as 1/30 s | timestamps from frame_id after gap-dropping, not raw row order |
 | xG model refuses to fit | zero goals in corpus | more games; confirm Goal events emit a paired `shot` |
+
+---
+
+# Appendix — Resolved conventions for BDC 2026 (2025-26 season files)
+
+Measured from the real files (10 games, 33 tracking files) with
+`scripts/inspect_raw_data.py`. These are answers, not guesses; they turn
+Steps 2–6 into mechanical work.
+
+## Tracking files (`<game>.Tracking_P<n>.csv`)
+
+| Aspect | Finding | Consequence for `bdc.py` |
+| --- | --- | --- |
+| Coordinates | x ∈ [−100, 100], y ∈ [−41.9, 42.5] feet, center origin | **Already canonical** — no `CoordinateNormalizer`. Drop the Z column. |
+| `Image Id` | string `"<game>_065468"` | Parse trailing digits to int; offset per period so P1/P2/P3 don't collide. |
+| Frame rate | **30 fps** (34,413 frames / 1,200 s of clock) | `timestamp = frame_index / 30.0`. |
+| Frame gaps | ids continue through stoppages; ~31 gaps/period, up to ~666 | Ids are broadcast time. **Split each period into contiguous segments at gaps** and process separately — never let kinematics span a whistle. |
+| `Player or Puck` | `Player` / `Puck` | Sets `position` (with the goalie rule below). |
+| `Team` | `Home` / `Away`, null on puck rows | Direct map to `Team`; puck gets `team="none"`. |
+| `Player Id` | **1,058 distinct per period** (range 1–15,130) | A per-detection **track id**, not a player. Do **not** use for identity. |
+| `Player Jersey Number` | 36 distinct | **The real identity.** `entity_id = f"{team}_{jersey}"`. |
+| Goalies | jersey number is the literal string **`"Go"`** | `position = "goalie" if jersey == "Go" else "skater"`. No inference needed. |
+| Unidentified rows | ~1,758 player rows/period with null jersey | Drop — they cannot get a stable `entity_id`. |
+| Missing coordinates | ~1,957 null x/y per period (0.6%) | Drop those rows, then interpolate within a segment if needed. |
+| Puck coverage | **100% of frames** | Step 4.2 interpolation is a **no-op** for this feed. |
+| Roster completeness | median 10 entities/frame (max 13) | Partial rosters are the norm → per-possession reindexing (Step 4.3) is mandatory. |
+| Goalie presence | goalies appear in only ~33–39% of frames | The xG model conditions on goalie location: forward-fill the goalie within a segment, or fall back to the crease (±87, 0) when absent. Decide explicitly. |
+
+## Event files (`<game>.Events.csv`)
+
+One file per game covering all periods; 1,878 rows in the sample game.
+
+| Aspect | Finding |
+| --- | --- |
+| Coordinates | `X_Coordinate` / `Y_Coordinate`, already canonical |
+| Identity | `Player_Id` holds **jersey numbers** (34 distinct) — joins to the tracking jersey column, *not* to `Player Id` |
+| Clock | `Clock` mm:ss at **1-second resolution** + `Period` |
+| Vocabulary | Play 672, Puck Recovery 511, Incomplete Play 174, Zone Entry 156, Dump In/Out 131, Shot 113, Faceoff Win 59, Takeaway 50, Penalty Taken 6, Goal 6 |
+| Extras | `Detail_2` ∈ {Blocked, Missed, On Net}; `Player_Id_2` = pass receiver / second player |
+
+**Event→frame alignment (amends Step 6):** a 1-second clock covers ~30
+frames, so the clock alone cannot identify a frame. Narrow to the frames
+inside that clock second, then pick the one whose **puck position is
+nearest the event's X/Y**. Sanity-check by confirming the shooter is near
+the puck at the chosen frame.
+
+**Training volume:** ~113 shots and 6 goals per game → roughly **1,130
+shots / 60 goals** across 10 games. Enough to fit xG.
+
+## Direction (`camera_orientations.csv`)
+
+One row per game: `GoalieTeamOnRightSideOfRink1stPeriod` ∈ {Home, Away}.
+That names the team whose **goalie defends +x in period 1** — i.e. the
+team that *attacks −x* in P1. Teams change ends each period, so:
+
+```python
+# For the team you analyze (say HOME):
+home_attacks_right_p1 = (orientation_flag == "Away")
+attacking_right = {p: home_attacks_right_p1 == (p % 2 == 1) for p in (1, 2, 3)}
+DirectionNormalizer(attacking_right).transform(tracking)
+```
+
+Verified against the 2025-10-11 game: flag is `Away`, and the measured
+mean x is **Away goalie +80.3 / Home goalie −85.4** in P1 — Home attacks
++x in P1, so `{1: True, 2: False, 3: True}`. Always re-verify per game by
+checking goalie mean x per period; it is a one-line assertion and it
+catches the single most damaging class of bug in this pipeline.
