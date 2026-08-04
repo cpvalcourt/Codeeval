@@ -377,3 +377,103 @@ mean x is **Away goalie +80.3 / Home goalie −85.4** in P1 — Home attacks
 +x in P1, so `{1: True, 2: False, 3: True}`. Always re-verify per game by
 checking goalie mean x per period; it is a one-line assertion and it
 catches the single most damaging class of bug in this pipeline.
+
+---
+
+# Appendix B — `bdc.py` blueprint
+
+The decomposition for Step 3. Each function does one thing and is
+testable on its own; the orchestrator only wires them together.
+
+## Pre-flight
+
+Confirm whether `Image Id` continues across periods or restarts:
+
+```bash
+python3 scripts/inspect_raw_data.py rawdata --game 2025-10-11
+# compare the P1 id range (65468-132578) with P2's
+```
+
+If P2 restarts near P1's start, add a per-period offset when building
+`frame_id`; if it continues, the parsed id is already game-unique.
+
+## Module constants
+
+```python
+TRACKING_COLS = {"frame": "Image Id", "clock": "Game Clock", ...}
+GOALIE_JERSEY = "Go"
+EVENT_MAP = {"Shot": EventType.SHOT, "Play": EventType.PASS,
+             "Incomplete Play": EventType.TURNOVER,
+             "Takeaway": EventType.TURNOVER, "Goal": EventType.GOAL}
+TAKEAWAY_FLIPS_TEAM = True   # credited to the team that GAINS the puck
+FRAME_RATE = 30.0
+```
+
+## Functions
+
+| Function | Responsibility |
+| --- | --- |
+| `parse_frame_id(series, period)` | trailing digits -> int, plus period offset if needed |
+| `build_entity_id(team, jersey, kind)` | `"puck"`, `"home_goalie"`, `"home_44"`; the single source of identity |
+| `load_tracking_period(path, period)` | read one CSV -> canonical tracking rows for that period (no direction flip yet) |
+| `direction_map(orientations, game_id, team)` | orientation flag -> `{period: attacks_right}` (see Appendix A) |
+| `load_events(path, game_id, frame_lookup)` | events CSV -> canonical events, frames resolved |
+| `align_event(event, frames_in_second, puck_xy)` | pick the frame whose puck is nearest the event's X/Y |
+| `split_segments(tracking, events, max_gap=2)` | contiguous play runs -> separate units, each with its own `game_id` suffix |
+| `BigDataCupLoader.load_game(...)` | orchestrate the above, end with `validate_tracking` / `validate_events` |
+
+## Order of operations (this order matters)
+
+1. Load each period's tracking; parse frame ids; drop null-jersey and
+   null-coordinate rows; build `entity_id`; set `position` from the
+   `"Go"` jersey rule.
+2. **Align events to frames using RAW coordinates** — canonical events
+   carry no x/y, so once tracking is flipped the geometric match is gone.
+3. Apply `DirectionNormalizer` to tracking.
+4. Apply the goalie-presence policy (forward-fill or crease fallback).
+5. `split_segments(...)` — never let a possession or a velocity span a
+   stoppage.
+6. Validate each segment; return the list.
+
+## Two mappings that bite
+
+- **Event team names**: tracking says `Home`/`Away`, but events say
+  `Team A`/`Team D`. Map via the events file's own `Home_Team` /
+  `Away_Team` columns: `"home" if row.Team == row.Home_Team else "away"`.
+- **Takeaway direction**: a Takeaway is credited to the team that *won*
+  the puck, so emit it as a `turnover` for the **other** team.
+
+## Suggested API
+
+```python
+class BigDataCupLoader:
+    def __init__(self, frame_rate: float = 30.0, min_segment_frames: int = 60): ...
+
+    def load_game(self, tracking_paths, events_path, orientations_path,
+                  game_id, team=Team.HOME) -> list[tuple[DataFrame, DataFrame]]:
+        """One (tracking, events) pair per contiguous play segment."""
+```
+
+Returning segments keeps the consumer trivial, since `EPVPipeline.fit`
+already takes a list of games:
+
+```python
+games = []
+for paths in discovered_games:
+    games.extend(loader.load_game(*paths))
+pipeline = EPVPipeline().fit(games, team=Team.HOME)
+```
+
+## Scope decision for v1
+
+Analyze **one team** (HOME) first. The direction map is team-relative, so
+covering both teams means loading the game twice with opposite maps.
+Get one team end-to-end before doubling the surface area.
+
+## Done when
+
+- `load_game` on one real game returns segments that pass
+  `validate_tracking` / `validate_events`
+- every segment has a puck row in every frame and stable `entity_id`s
+- a per-period assertion confirms the analyzed team's goalie sits at
+  negative mean x (it defends −x once the team attacks +x)
