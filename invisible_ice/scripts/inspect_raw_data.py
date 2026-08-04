@@ -21,6 +21,7 @@ import argparse
 import re
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 MAX_UNIQUE_TO_LIST = 12
@@ -82,9 +83,26 @@ def pick(df: pd.DataFrame, *patterns: str) -> str | None:
     return None
 
 
+def numeric_frame_index(series: pd.Series) -> tuple[pd.Series, str]:
+    """Coerce a frame column to sortable integers.
+
+    Real feeds label frames with strings like
+    ``"2025-10-11 Team A @ Team D_065468"``; the trailing digits are the
+    sequence number. Returns (values, note describing what was done).
+    """
+    numeric = pd.to_numeric(series, errors="coerce")
+    if numeric.notna().any():
+        return numeric, "already numeric"
+    digits = series.astype(str).str.extract(r"(\d+)\s*$")[0]
+    return (
+        pd.to_numeric(digits, errors="coerce"),
+        "string ids -> parsed trailing digits (your loader must do the same)",
+    )
+
+
 def analyze_tracking(paths: list[Path]) -> None:
     banner(f"TRACKING — {len(paths)} file(s); analyzing {paths[0].name}")
-    df = pd.read_csv(paths[0])
+    df = pd.read_csv(paths[0], low_memory=False)
     describe_columns(df, "columns")
 
     frame_col = pick(df, r"image.?id", r"frame")
@@ -119,45 +137,62 @@ def analyze_tracking(paths: list[Path]) -> None:
             print("   => looks CORNER-ORIGIN 0..200 x 0..85: use CoordinateNormalizer(BIG_DATA_CUP)")
         else:
             print("   => unrecognized extent: build SourceCoordinateSystem with these bounds")
+        missing = int(df[x_col].isna().sum() + df[y_col].isna().sum())
+        if missing:
+            pct = 100 * missing / (2 * len(df))
+            print(f"   !! {missing:,} missing coordinate values ({pct:.2f}% of cells)")
+            print("      -> drop or interpolate these rows before validation (guide Step 4.4)")
 
+    frames = None
     if frame_col:
-        frames = df[frame_col].dropna().unique()
-        frames.sort()
-        gaps = pd.Series(frames).diff().dropna()
-        print("\n-- frame index --")
-        print(f"   {len(frames):,} distinct values, from {frames[0]} to {frames[-1]}")
-        print(f"   step sizes: {gaps.value_counts().head(5).to_dict()}")
-        print(f"   contiguous: {bool((gaps == gaps.mode()[0]).all())}")
+        frames_raw, note = numeric_frame_index(df[frame_col])
+        print(f"\n-- frame index ({frame_col!r}: {note}) --")
+        frames = frames_raw
+        values = np.sort(np.asarray(frames.dropna().unique(), dtype=float))
+        gaps = pd.Series(values).diff().dropna()
+        if len(values):
+            print(f"   {len(values):,} distinct, from {values[0]:.0f} to {values[-1]:.0f}")
+            print(f"   step sizes: {gaps.value_counts().head(5).to_dict()}")
+            print(f"   contiguous: {bool(len(gaps) and (gaps == 1).all())}")
+            span = values[-1] - values[0] + 1
+            if span > len(values):
+                print(f"   !! {span - len(values):,.0f} frame numbers absent inside the range")
 
         if clock_col:
             clock = pd.to_numeric(df[clock_col], errors="coerce")
             if clock.isna().all():  # mm:ss text
                 parsed = df[clock_col].astype(str).str.extract(r"(\d+):(\d+)")
                 clock = parsed[0].astype(float) * 60 + parsed[1].astype(float)
-            paired = pd.DataFrame({"f": df[frame_col], "c": clock}).dropna().drop_duplicates("f")
+            paired = (
+                pd.DataFrame({"f": frames, "c": clock}).dropna().drop_duplicates("f")
+            )
             if len(paired) > 10:
                 span_frames = paired["f"].max() - paired["f"].min()
                 span_seconds = abs(paired["c"].max() - paired["c"].min())
                 if span_seconds > 0:
-                    print(f"\n-- frame rate --")
+                    print("\n-- frame rate --")
                     print(f"   ~{span_frames / span_seconds:.2f} frames/second "
                           f"({span_frames:,.0f} frames over {span_seconds:,.0f}s)")
                 counts_down = paired.sort_values("f")["c"].diff().mean() < 0
-                print(f"   clock counts {'DOWN' if counts_down else 'UP'}")
+                print(f"   clock counts {'DOWN' if counts_down else 'UP'}"
+                      " (derive timestamps from the frame index, not the clock)")
 
     if kind_col:
         print("\n-- puck vs players --")
         print(f"   {kind_col!r} values: {df[kind_col].value_counts().to_dict()}")
 
-    if frame_col:
-        per_frame = df.groupby(frame_col).size()
+    if frames is not None:
+        per_frame = df.groupby(frames).size()
         print("\n-- entities per frame (roster stability) --")
         print(f"   {per_frame.value_counts().head(6).to_dict()}")
         print(f"   min {per_frame.min()}, median {per_frame.median():.0f}, max {per_frame.max()}")
+        if per_frame.min() < per_frame.median():
+            print("   !! frames with partial rosters -> per-possession reindexing"
+                  " needed (guide Step 4.3)")
         if kind_col:
             puck_mask = df[kind_col].astype(str).str.contains("puck", case=False, na=False)
-            frames_with_puck = df.loc[puck_mask, frame_col].nunique()
-            total = df[frame_col].nunique()
+            frames_with_puck = frames[puck_mask].nunique()
+            total = int(frames.nunique())
             pct = 100 * frames_with_puck / total if total else 0
             print(f"   frames containing a puck row: {frames_with_puck:,}/{total:,} ({pct:.1f}%)")
             if pct < 100:
@@ -170,13 +205,29 @@ def analyze_tracking(paths: list[Path]) -> None:
         if team_col:
             by_team = df.groupby(team_col)[player_col].nunique()
             print(f"   distinct players per team: {by_team.to_dict()}")
-            print("   (a team with ~10-12 skaters over a period is normal; "
-                  "goalies must be identified separately — check the roster or crease position)")
+
+    # Goalies are rarely flagged in the feed; infer them from where they live.
+    if player_col and x_col and team_col:
+        print("\n-- likely goalies (mean |x| nearest the goal line) --")
+        players = df[df[player_col].notna()]
+        stats = players.groupby([team_col, player_col]).agg(
+            mean_x=(x_col, "mean"), frames=(x_col, "size")
+        )
+        stats = stats[stats["frames"] > 0.05 * len(players)]
+        for team, group in stats.groupby(level=0):
+            ranked = group.reindex(group["mean_x"].abs().sort_values(ascending=False).index)
+            top = ranked.head(2)
+            print(f"   {team}:")
+            for (_, pid), row in top.iterrows():
+                print(f"      player {pid:>8} mean x {row['mean_x']:+7.1f} "
+                      f"({row['frames']:,} rows)")
+        print("   The extreme-|x| player per team is almost certainly the goalie;")
+        print("   confirm against the Shifts file, then set position='goalie'.")
 
 
 def analyze_events(paths: list[Path]) -> None:
     banner(f"EVENTS — {len(paths)} file(s); analyzing {paths[0].name}")
-    df = pd.read_csv(paths[0])
+    df = pd.read_csv(paths[0], low_memory=False)
     describe_columns(df, "columns")
 
     event_col = pick(df, r"^event$", r"event.?type", r"event")
