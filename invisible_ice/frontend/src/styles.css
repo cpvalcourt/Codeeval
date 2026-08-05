@@ -353,3 +353,28 @@ body {
   color: var(--ink-muted);
   font-size: 0.85rem;
 }
+
+/* Game picker */
+.game-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.game-picker-label {
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.game-select {
+  flex: 1;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink-primary);
+}

@@ -127,3 +127,31 @@ def write_game_json(payload: dict, path: Path | str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, separators=(",", ":")))
     return path
+
+
+def manifest_entry(payload: dict, file_name: str) -> dict:
+    """Summary card for one game, used by the frontend's game picker."""
+    possessions = payload["possessions"]
+    peak = max(
+        (max(p["series"]["epv"]) for p in possessions if p["series"]["epv"]),
+        default=0.0,
+    )
+    total_frames = sum(len(p["frames"]) for p in possessions)
+    return {
+        "gameId": payload["gameId"],
+        "file": file_name,
+        "possessions": len(possessions),
+        "seconds": round(total_frames / payload["frameRate"], 1),
+        "peakEpv": round(peak, _PROB_DECIMALS),
+    }
+
+
+def manifest_payload(entries: list[dict]) -> dict:
+    """Index of available games, newest-looking id first is left to callers."""
+    if not entries:
+        raise ValueError("manifest requires at least one game entry")
+    return {"version": PAYLOAD_VERSION, "games": entries}
+
+
+def write_manifest(entries: list[dict], path: Path | str) -> Path:
+    return write_game_json(manifest_payload(entries), path)

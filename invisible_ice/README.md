@@ -43,9 +43,23 @@ tracking + events
 ## Quick start
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev]"     # needs Python 3.11+
 pytest                      # full unit + integration suite
 ```
+
+**Real tracking data.** `data/bdc.py` adapts Stathletes Big Data Cup
+files to the canonical schema; `scripts/make_real_data.py` runs the whole
+chain — discover games, load, train, analyze, export payloads plus an
+index manifest — and gates each stage on the checks in `diagnostics.py`,
+exiting non-zero if any fail:
+
+```bash
+python3 scripts/inspect_raw_data.py rawdata   # what conventions does the feed use?
+python3 scripts/make_real_data.py rawdata     # -> frontend/public/data/*.json + index.json
+```
+
+See `docs/REAL_DATA_GUIDE.md` for the measured conventions and the
+step-by-step walkthrough.
 
 ```python
 from invisible_ice import EPVPipeline, Team
@@ -107,7 +121,8 @@ movement changed the threat picture in the direction of the swing
 
 ## Testing
 
-Every module has a dedicated test file under `tests/` (117 tests):
+Every module has a dedicated test file under `tests/` (183 Python tests
+plus 49 in the frontend):
 geometry and kinematics are verified against exact closed-form motion,
 the possession machine against hand-constructed scenarios, the EPV
 recursion against hand-computed arithmetic using stub models, and the
@@ -132,6 +147,9 @@ coordinates quantized to 0.1 ft, probabilities to 4 decimals), and
 - **Controls & context** — play/pause/scrub/speed, per-possession
   picker chips, live EPV readout, and the per-player on-/off-puck
   attribution table.
+- **Multi-game catalog** — reads `data/index.json` when present and
+  offers a game picker; falls back to the single bundled demo payload
+  when no manifest has been exported.
 - **Theming** — light and dark from a validated palette (the categorical
   team colors pass CVD-separation and contrast checks in both modes);
   identity is never color-alone (shapes for goalies/puck, numbered

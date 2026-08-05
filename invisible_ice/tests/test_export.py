@@ -9,8 +9,11 @@ from invisible_ice.domain import Possession, Team
 from invisible_ice.export import (
     PAYLOAD_VERSION,
     game_payload,
+    manifest_entry,
+    manifest_payload,
     possession_payload,
     write_game_json,
+    write_manifest,
 )
 from invisible_ice.pipeline import PossessionAnalysis
 
@@ -119,3 +122,29 @@ class TestWriteGameJson:
         text = out.read_text()
         assert ": " not in text  # minified
         assert json.loads(text)["gameId"] == "g1"
+
+
+class TestManifest:
+    def test_entry_summarizes_a_game(self):
+        payload = game_payload("g1", build_tracking(), [build_analysis()])
+        entry = manifest_entry(payload, "g1.json")
+        assert entry["gameId"] == "g1"
+        assert entry["file"] == "g1.json"
+        assert entry["possessions"] == 1
+        assert entry["peakEpv"] == 0.08
+        assert entry["seconds"] == pytest.approx(4 / 30.0, abs=0.05)
+
+    def test_manifest_wraps_entries_with_version(self):
+        payload = game_payload("g1", build_tracking(), [build_analysis()])
+        manifest = manifest_payload([manifest_entry(payload, "g1.json")])
+        assert manifest["version"] == PAYLOAD_VERSION
+        assert len(manifest["games"]) == 1
+
+    def test_empty_manifest_rejected(self):
+        with pytest.raises(ValueError, match="at least one"):
+            manifest_payload([])
+
+    def test_write_manifest_roundtrip(self, tmp_path):
+        payload = game_payload("g1", build_tracking(), [build_analysis()])
+        out = write_manifest([manifest_entry(payload, "g1.json")], tmp_path / "index.json")
+        assert json.loads(out.read_text())["games"][0]["gameId"] == "g1"

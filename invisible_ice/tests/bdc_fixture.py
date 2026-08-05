@@ -51,6 +51,7 @@ def build_game(
     for segment in range(n_segments):
         # Puck carrier walks toward the attacking net so EPV has signal.
         carrier_x = -40.0 * home_sign
+        carrier = HOME_JERSEYS[segment % len(HOME_JERSEYS)]
         for step in range(segment_frames):
             frame += 1
             clock -= 1 / 30.0
@@ -62,8 +63,14 @@ def build_game(
                 for jersey in jerseys:
                     if rng.random() < 0.12:  # off camera
                         continue
-                    x = puck_xy[0] + rng.normal(0, 12) * (1 if team == "Home" else 1.4)
-                    y = float(rng.normal(0, 15))
+                    if team == "Home" and jersey == carrier:
+                        # The carrier stays on the puck, as in real play, so
+                        # the possession state machine can detect control.
+                        x = puck_xy[0] + rng.normal(0, 0.8)
+                        y = puck_xy[1] + rng.normal(0, 0.8)
+                    else:
+                        x = puck_xy[0] + rng.normal(0, 12) * (1 if team == "Home" else 1.4)
+                        y = float(rng.normal(0, 15))
                     if rng.random() < 0.005:
                         x = y = np.nan
                     rows.append(
@@ -108,13 +115,18 @@ def build_game(
 
     orientations_path = directory / "camera_orientations.csv"
     # Flag names the team whose goalie defends +x in P1 — the team that
-    # does NOT attack right.
-    pd.DataFrame(
+    # does NOT attack right. The real file holds one row per game, so
+    # accumulate rather than overwrite when several games share a folder.
+    row = pd.DataFrame(
         [{
             "Game": game_key,
             "GoalieTeamOnRightSideOfRink1stPeriod": "Away" if home_attacks_right_p1 else "Home",
         }]
-    ).to_csv(orientations_path, index=False)
+    )
+    if orientations_path.exists():
+        existing = pd.read_csv(orientations_path)
+        row = pd.concat([existing[existing["Game"] != game_key], row], ignore_index=True)
+    row.to_csv(orientations_path, index=False)
 
     return {
         "tracking": {1: tracking_path},

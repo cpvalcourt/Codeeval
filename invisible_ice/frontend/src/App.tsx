@@ -3,13 +3,14 @@ import { useEffect, useMemo, useState } from "react";
 import { AttributionTable } from "./components/AttributionTable";
 import { Controls } from "./components/Controls";
 import { EPVChart } from "./components/EPVChart";
+import { GamePicker } from "./components/GamePicker";
 import { PossessionPicker } from "./components/PossessionPicker";
 import { RinkCanvas } from "./components/RinkCanvas";
 import { usePlayback } from "./hooks/usePlayback";
-import { parseGamePayload } from "./lib/payload";
+import { loadCatalog, loadGame } from "./lib/catalog";
 import { sampleSeries } from "./lib/interpolate";
 import { paletteFor } from "./lib/theme";
-import { GamePayload } from "./lib/types";
+import { GamePayload, ManifestEntry } from "./lib/types";
 
 function useDarkMode(): boolean {
   const [dark, setDark] = useState(
@@ -93,28 +94,40 @@ function Viewer({ game }: { game: GamePayload }) {
 }
 
 export default function App() {
+  const [catalog, setCatalog] = useState<ManifestEntry[] | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
   const [game, setGame] = useState<GamePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const dataUrl = useMemo(() => `${import.meta.env.BASE_URL}data/demo.json`, []);
+  const baseUrl = useMemo(() => `${import.meta.env.BASE_URL}data/`, []);
 
   useEffect(() => {
     let cancelled = false;
-    fetch(dataUrl)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status} loading ${dataUrl}`);
-        return res.json();
+    loadCatalog(baseUrl, fetch)
+      .then((games) => {
+        if (cancelled) return;
+        setCatalog(games);
+        setSelected(games[0].gameId);
       })
-      .then((raw) => {
-        if (!cancelled) setGame(parseGamePayload(raw));
-      })
-      .catch((err) => {
-        if (!cancelled) setError(String(err));
-      });
+      .catch((err) => !cancelled && setError(String(err)));
     return () => {
       cancelled = true;
     };
-  }, [dataUrl]);
+  }, [baseUrl]);
+
+  useEffect(() => {
+    if (!catalog || !selected) return;
+    const entry = catalog.find((g) => g.gameId === selected);
+    if (!entry) return;
+    let cancelled = false;
+    setGame(null);
+    loadGame(baseUrl, entry.file, fetch)
+      .then((payload) => !cancelled && setGame(payload))
+      .catch((err) => !cancelled && setError(String(err)));
+    return () => {
+      cancelled = true;
+    };
+  }, [baseUrl, catalog, selected]);
 
   return (
     <main className="app">
@@ -124,9 +137,12 @@ export default function App() {
           Framewise Expected Possession Value {game ? `· ${game.gameId}` : ""}
         </p>
       </header>
+      {catalog && selected && (
+        <GamePicker games={catalog} selected={selected} onSelect={setSelected} />
+      )}
       {error && <p className="error">Failed to load game data: {error}</p>}
       {!error && !game && <p className="hint">Loading game data…</p>}
-      {game && <Viewer game={game} />}
+      {game && <Viewer key={game.gameId} game={game} />}
     </main>
   );
 }

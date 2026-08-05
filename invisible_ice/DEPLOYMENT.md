@@ -38,7 +38,17 @@ pip install -e ".[dev]"
 python3 scripts/make_demo_data.py     # writes frontend/public/data/demo.json
 ```
 
-Real data: run your ingestion + `EPVPipeline`, then serialize each game:
+Real Big Data Cup data — one command produces every payload and the
+index manifest the site's game picker reads:
+
+```bash
+python3 scripts/make_real_data.py rawdata
+```
+
+It exits non-zero if any diagnostic check fails (no shots, inverted
+direction, flat EPV), so it is safe to run in CI ahead of a deploy.
+
+Or drive the pieces yourself:
 
 ```python
 from invisible_ice.export import game_payload, write_game_json
@@ -57,7 +67,7 @@ gzip/brotli handle the rest — no protobuf step is needed at this scale.
 ```bash
 cd invisible_ice/frontend
 npm ci                 # reproducible install from package-lock.json
-npm test               # 40 unit tests
+npm test               # 49 unit tests
 npm run build          # tsc --noEmit + vite build → dist/
 npm run preview        # optional: serve dist/ locally to smoke-test
 ```
@@ -119,9 +129,10 @@ relative base means the `/<repo>/` subpath works without changes.
    builds fast and hermetic).
 3. Push — the connected host rebuilds and deploys.
 
-The app currently loads `data/demo.json`; pointing it at a game picker
-over multiple payload files is a frontend-only change (fetch a
-`data/index.json` manifest listing available games).
+The app reads `data/index.json` when present and shows a game picker
+over everything it lists; with no manifest it falls back to the bundled
+`data/demo.json`. `scripts/make_real_data.py` writes both the payloads
+and the manifest, so adding games needs no code change.
 
 ## 6. CI gate
 

@@ -66,3 +66,17 @@ export interface EntitySample {
   x: number;
   y: number;
 }
+
+/** One row of data/index.json — the catalog of available games. */
+export interface ManifestEntry {
+  gameId: string;
+  file: string;
+  possessions: number;
+  seconds: number;
+  peakEpv: number;
+}
+
+export interface Manifest {
+  version: number;
+  games: ManifestEntry[];
+}

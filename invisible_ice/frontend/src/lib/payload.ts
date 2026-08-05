@@ -5,6 +5,7 @@
 
 import {
   GamePayload,
+  Manifest,
   PossessionData,
   SERIES_NAMES,
   SUPPORTED_PAYLOAD_VERSION,
@@ -52,4 +53,26 @@ export function parseGamePayload(raw: unknown): GamePayload {
   }
   p.possessions.forEach(checkPossession);
   return p;
+}
+
+/** Validate data/index.json. Absence of the file is not an error — the
+ *  app falls back to the single demo payload — but malformed content is. */
+export function parseManifest(raw: unknown): Manifest {
+  const m = raw as Manifest;
+  if (typeof m !== "object" || m === null) fail("manifest is not an object");
+  if (m.version !== SUPPORTED_PAYLOAD_VERSION) {
+    fail(`unsupported manifest version ${m.version}`);
+  }
+  if (!Array.isArray(m.games) || m.games.length === 0) {
+    fail("manifest lists no games");
+  }
+  m.games.forEach((game, i) => {
+    if (!game || typeof game.gameId !== "string" || typeof game.file !== "string") {
+      fail(`manifest games[${i}] is missing gameId or file`);
+    }
+    if (game.file.includes("..") || game.file.startsWith("/")) {
+      fail(`manifest games[${i}] has an unsafe file path`);
+    }
+  });
+  return m;
 }
